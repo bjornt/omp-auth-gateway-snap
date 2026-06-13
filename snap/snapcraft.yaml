@@ -41,15 +41,11 @@ platforms:
   arm64:
 
 apps:
-  # --- Management CLIs ---
-  # The gateway CLI matches the snap name, so it is exposed directly as the
-  # bare command `omp-auth-gateway` with no alias needed.
   omp-auth-gateway:
     command: bin/omp-auth-gateway
     plugs:
       - network
       - network-bind
-  # The broker CLI is aliased to the bare command `omp-auth-broker`.
   broker:
     command: bin/omp-auth-broker
     aliases: [omp-auth-broker]
@@ -57,7 +53,6 @@ apps:
       - network
       - network-bind
 
-  # --- Long-running services (auto-started and enabled on install) ---
   gateway-daemon:
     command: bin/omp-auth-gateway serve
     daemon: simple
@@ -95,19 +90,20 @@ parts:
           ;;
       esac
 
-      base_url="https://github.com/can1357/oh-my-pi/releases/latest"
+      # Pin the snap to the omp release recorded in LATEST_OMP_VERSION. This
+      # makes builds reproducible and lets a new revision (and thus a new snap
+      # build) be triggered simply by bumping that file. Use
+      # scripts/update-omp-version.sh to refresh it when upstream cuts a new
+      # release.
+      ver="$(cat "${CRAFT_PROJECT_DIR}/LATEST_OMP_VERSION")"
+      ver="${ver#v}"
+      craftctl set version="${ver}"
 
-      # Pin the snap version to the latest upstream release tag by reading
-      # the redirect target of the /releases/latest URL (e.g. .../tag/v15.12.3).
-      ver="$(curl -fsSL -o /dev/null -w '%{url_effective}' "${base_url}")"
-      ver="${ver##*/tag/}"
-      craftctl set version="${ver#v}"
-
-      # Download the latest released omp binary for this architecture.
+      # Download the pinned omp binary for this architecture.
       install -d "${CRAFT_PART_INSTALL}/bin"
       curl -fSL --retry 3 --retry-delay 2 \
         -o "${CRAFT_PART_INSTALL}/bin/omp" \
-        "${base_url}/download/omp-linux-${omp_arch}"
+        "https://github.com/can1357/oh-my-pi/releases/download/v${ver}/omp-linux-${omp_arch}"
       chmod 0755 "${CRAFT_PART_INSTALL}/bin/omp"
 
   wrappers:

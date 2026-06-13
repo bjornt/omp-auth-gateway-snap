@@ -1,0 +1,37 @@
+name: Update omp version
+
+# Checks for a new oh-my-pi (omp) release and, if found, bumps
+# LATEST_OMP_VERSION and commits directly to the default branch. Pushing that
+# commit is what triggers a new snap build.
+
+on:
+  schedule:
+    # Hourly, on the hour.
+    - cron: "0 * * * *"
+  # Allow manual runs from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update LATEST_OMP_VERSION
+        run: ./scripts/update-omp-version.sh
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet -- LATEST_OMP_VERSION; then
+            echo "No change to commit."
+            exit 0
+          fi
+          version="$(cat LATEST_OMP_VERSION)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add LATEST_OMP_VERSION
+          git commit -m "chore: bump omp to ${version}"
+          git push
