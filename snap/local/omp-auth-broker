@@ -1,0 +1,25 @@
+#!/bin/sh
+# Wrapper for `omp auth-broker`, exposed as `omp-auth-broker`.
+#
+# Forces HOME to the shared, root-owned snap data dir so that this CLI and the
+# `broker-daemon` service operate on the very same SQLite credential vault and
+# bearer token under $SNAP_COMMON/.omp.
+set -eu
+
+export HOME="${SNAP_COMMON}"
+mkdir -p "${HOME}/.omp" 2>/dev/null || true
+
+# When asked to serve, fill in the bind address from snap configuration
+# (`snap set omp-auth broker.bind=HOST:PORT`) unless the caller passed one.
+if [ "${1:-}" = "serve" ]; then
+  case " $* " in
+    *" --bind="* | *" --bind "* | *" -b "*) ;;
+    *)
+      bind="$(snapctl get broker.bind 2>/dev/null || true)"
+      [ -n "${bind}" ] || bind="127.0.0.1:8765"
+      set -- "$@" "--bind=${bind}"
+      ;;
+  esac
+fi
+
+exec "${SNAP}/bin/omp" auth-broker "$@"

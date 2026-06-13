@@ -1,0 +1,121 @@
+name: omp-auth-gateway
+title: omp auth-gateway and broker
+base: core26
+adopt-info: omp
+license: MIT
+contact: https://github.com/bjornt/omp-auth-gateway-snap/issues
+issues: https://github.com/bjornt/omp-auth-gateway-snap/issues
+source-code: https://github.com/bjornt/omp-auth-gateway-snap
+website: https://github.com/bjornt/omp-auth-gateway-snap
+summary: Confined omp auth-gateway (and auth-broker) services
+description: |
+  Runs the oh-my-pi (omp) forward-proxy gateway and its credential broker as
+  confined, auto-starting snap services. This keeps your LLM provider
+  credentials (OAuth refresh tokens and API keys) outside of the containers
+  in which you run omp itself.
+
+  Two daemons are installed and enabled automatically:
+    * gateway-daemon -> `omp auth-gateway serve` (forward proxy,    default 127.0.0.1:4000)
+    * broker-daemon  -> `omp auth-broker serve`  (credential vault, default 127.0.0.1:8765)
+
+  Two wrapper commands are provided for ad-hoc management (login, token,
+  status, check, import, migrate, ...). The gateway command works out of the
+  box; expose the broker one with:
+    snap alias omp-auth-gateway.broker omp-auth-broker
+
+  Both the CLI wrappers and the daemons share a single root-owned vault, so
+  `sudo omp-auth-broker login anthropic` adds credentials that the running
+  broker-daemon immediately serves.
+
+  Configuration (changes restart the affected services):
+    snap set omp-auth-gateway gateway.bind=0.0.0.0:4000
+    snap set omp-auth-gateway broker.bind=127.0.0.1:8765
+    snap set omp-auth-gateway gateway.broker-url=http://127.0.0.1:8765
+
+grade: stable
+confinement: strict
+
+# Build targets. Upstream ships Linux binaries for x86_64 and aarch64 only.
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  # --- Management CLIs ---
+  # The gateway CLI matches the snap name, so it is exposed directly as the
+  # bare command `omp-auth-gateway` with no alias needed.
+  omp-auth-gateway:
+    command: bin/omp-auth-gateway
+    plugs:
+      - network
+      - network-bind
+  # The broker CLI is aliased to the bare command `omp-auth-broker`.
+  broker:
+    command: bin/omp-auth-broker
+    aliases: [omp-auth-broker]
+    plugs:
+      - network
+      - network-bind
+
+  # --- Long-running services (auto-started and enabled on install) ---
+  gateway-daemon:
+    command: bin/omp-auth-gateway serve
+    daemon: simple
+    install-mode: enable
+    after: [broker-daemon]
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+  broker-daemon:
+    command: bin/omp-auth-broker serve
+    daemon: simple
+    install-mode: enable
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+
+parts:
+  omp:
+    plugin: nil
+    build-packages:
+      - curl
+      - ca-certificates
+    override-build: |
+      set -eu
+
+      # Map the snap/Debian architecture to upstream's asset suffix.
+      case "${CRAFT_ARCH_BUILD_FOR}" in
+        amd64) omp_arch=x64 ;;
+        arm64) omp_arch=arm64 ;;
+        *)
+          echo "Unsupported architecture: ${CRAFT_ARCH_BUILD_FOR}" >&2
+          exit 1
+          ;;
+      esac
+
+      base_url="https://github.com/can1357/oh-my-pi/releases/latest"
+
+      # Pin the snap version to the latest upstream release tag by reading
+      # the redirect target of the /releases/latest URL (e.g. .../tag/v15.12.3).
+      ver="$(curl -fsSL -o /dev/null -w '%{url_effective}' "${base_url}")"
+      ver="${ver##*/tag/}"
+      craftctl set version="${ver#v}"
+
+      # Download the latest released omp binary for this architecture.
+      install -d "${CRAFT_PART_INSTALL}/bin"
+      curl -fSL --retry 3 --retry-delay 2 \
+        -o "${CRAFT_PART_INSTALL}/bin/omp" \
+        "${base_url}/download/omp-linux-${omp_arch}"
+      chmod 0755 "${CRAFT_PART_INSTALL}/bin/omp"
+
+  wrappers:
+    plugin: dump
+    source: snap/local
+    organize:
+      omp-auth-broker: bin/omp-auth-broker
+      omp-auth-gateway: bin/omp-auth-gateway
+    stage:
+      - bin/omp-auth-broker
+      - bin/omp-auth-gateway

@@ -1,0 +1,45 @@
+#!/bin/sh
+# Wrapper for `omp auth-gateway`, exposed as `omp-auth-gateway`.
+#
+# The gateway is itself a broker client, so it needs the broker URL and the
+# broker's bearer token. Both are resolved here from snap configuration and
+# from the shared vault dir that `broker-daemon` writes to.
+set -eu
+
+export HOME="${SNAP_COMMON}"
+mkdir -p "${HOME}/.omp" 2>/dev/null || true
+
+broker_token_file="${HOME}/.omp/auth-broker.token"
+
+# Broker URL: `snap set omp-auth gateway.broker-url=...`, default loopback.
+if [ -z "${OMP_AUTH_BROKER_URL:-}" ]; then
+  url="$(snapctl get gateway.broker-url 2>/dev/null || true)"
+  export OMP_AUTH_BROKER_URL="${url:-http://127.0.0.1:8765}"
+fi
+
+if [ "${1:-}" = "serve" ]; then
+  # On first boot, wait briefly for the broker to publish its bearer token.
+  i=0
+  while [ ! -f "${broker_token_file}" ] && [ "${i}" -lt 30 ]; do
+    sleep 1
+    i=$((i + 1))
+  done
+
+  # Fill in the bind address from snap config unless the caller passed one.
+  case " $* " in
+    *" --bind="* | *" --bind "* | *" -b "*) ;;
+    *)
+      bind="$(snapctl get gateway.bind 2>/dev/null || true)"
+      [ -n "${bind}" ] || bind="127.0.0.1:4000"
+      set -- "$@" "--bind=${bind}"
+      ;;
+  esac
+fi
+
+# Authenticate to the broker using the token it wrote to the shared vault.
+if [ -z "${OMP_AUTH_BROKER_TOKEN:-}" ] && [ -r "${broker_token_file}" ]; then
+  OMP_AUTH_BROKER_TOKEN="$(cat "${broker_token_file}")"
+  export OMP_AUTH_BROKER_TOKEN
+fi
+
+exec "${SNAP}/bin/omp" auth-gateway "$@"

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Apply configuration changes by restarting the affected services so new
+# bind addresses / broker URL take effect. Restarting is a no-op-safe call:
+# on first install the services may not be running yet, so failures are
+# ignored.
+set -eu
+
+snapctl restart "${SNAP_NAME}.broker-daemon" 2>/dev/null || true
+snapctl restart "${SNAP_NAME}.gateway-daemon" 2>/dev/null || true
