@@ -94,11 +94,49 @@ sudo snap set omp-auth-gateway gateway.broker-url=http://127.0.0.1:8765
 
 ## Build
 
-The build downloads the **latest released** `omp` binary for the target
-architecture from upstream's GitHub releases. Linux builds are supported for
-`amd64` and `arm64`.
+The build downloads the `omp` release pinned in `LATEST_OMP_VERSION` for the
+target architecture from upstream's GitHub releases. Linux builds are supported
+for `amd64` and `arm64`.
 
 ```sh
 snapcraft                      # build for the host architecture
 snapcraft remote-build         # build all declared architectures
 ```
+
+## Candidate testing and stable promotion
+
+Snaps are built in Launchpad after the GitHub mirror is updated. The
+[Launchpad recipe](https://launchpad.net/~bjornt/+snap/omp-auth-gateway-snap-candidate)
+publishes builds to `latest/candidate`; promotion to `latest/stable` is gated
+by the smoke tests below.
+
+The **Test and promote candidate Snap** workflow polls at 30 minutes past each
+hour and can be dispatched manually from the default branch. It:
+
+1. Reads explicit `latest/candidate` revisions for both supported architectures
+   from the Snap Store. Missing candidates never fall back to another channel.
+   Scheduled runs skip pairs already published to stable; manual runs retest.
+2. Installs each exact revision on native Ubuntu 26.04 runners (`ubuntu-26.04`
+   and `ubuntu-26.04-arm`), holds automatic refreshes, and downloads the latest
+   released upstream `omp` client. The hosted images already include snapd;
+   installing the candidate also installs its `core26` base automatically.
+3. Runs `scripts/smoke-snap.py` against the installed, strictly confined broker
+   and gateway. A loopback OpenAI-compatible mock advertises a Moonshot model
+   and returns a deterministic streaming completion. Moonshot's supported
+   `MOONSHOT_BASE_URL` override routes the gateway to the mock. The client gets
+   only the gateway token; the mock checks the prompt, model and dummy provider
+   key retrieved from the broker, and the script checks the exact answer.
+4. Only after **both** smoke jobs succeed, rechecks that candidate still points
+   to the tested revision pair and releases those exact revisions to
+   `latest/stable`. Failed tests or a changed candidate set block promotion.
+
+No LLM credentials, inference snap, GPU or model download is needed. This checks
+the client/proxy/credential/streaming path, not real-model inference quality.
+The smoke script is for disposable runners with an empty broker vault: it adds
+a dummy credential, configures gateway port `14000`, temporarily overrides the
+gateway service's upstream endpoint, and stops that service on exit.
+
+Store publishing credentials are exposed only to the final promotion step,
+never to the smoke jobs. Stable updates for the two architectures are separate
+Store operations, not atomic; if one fails, the next run retests the candidate
+pair and retries promotion.

@@ -1,0 +1,116 @@
+name: Test and promote candidate Snap
+
+on:
+  schedule:
+    # Poll Launchpad uploads half an hour after the upstream version check.
+    - cron: "30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize discovery, tests and promotion; never interrupt a release in progress.
+concurrency:
+  group: snap-stable-promotion
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    # Dispatch only from the default branch, with no arbitrary checkout input.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-26.04
+    outputs:
+      run: ${{ steps.candidates.outputs.run }}
+      matrix: ${{ steps.candidates.outputs.matrix }}
+      amd64: ${{ steps.candidates.outputs.amd64 }}
+      arm64: ${{ steps.candidates.outputs.arm64 }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Discover explicit latest/candidate revisions
+        id: candidates
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          args=()
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            args+=(--force)
+          fi
+          python3 scripts/snap-candidates.py discover "${args[@]}"
+
+  smoke:
+    needs: discover
+    if: needs.discover.outputs.run == 'true'
+    name: Smoke ${{ matrix.architecture }} revision ${{ matrix.revision }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install the exact candidate revision
+        env:
+          REVISION: ${{ matrix.revision }}
+        run: |
+          sudo snap install omp-auth-gateway --revision="$REVISION"
+          sudo snap refresh --hold=forever omp-auth-gateway
+      - name: Install latest released upstream omp
+        env:
+          UPSTREAM_ARCHITECTURE: ${{ matrix.upstream_architecture }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/omp-bin"
+          curl --fail --location --retry 3 \
+            "https://github.com/can1357/oh-my-pi/releases/latest/download/omp-linux-$UPSTREAM_ARCHITECTURE" \
+            --output "$RUNNER_TEMP/omp-bin/omp"
+          chmod 0755 "$RUNNER_TEMP/omp-bin/omp"
+          echo "$RUNNER_TEMP/omp-bin" >> "$GITHUB_PATH"
+      - name: Exercise confined gateway and broker with a real omp prompt
+        run: python3 scripts/smoke-snap.py
+      - name: Collect Snap diagnostics on failure
+        if: failure()
+        run: |
+          sudo snap list || true
+          sudo snap services omp-auth-gateway || true
+          sudo snap logs omp-auth-gateway -n=200 || true
+          sudo journalctl -u snapd --no-pager -n 100 || true
+
+  promote:
+    needs: [discover, smoke]
+    if: needs.discover.outputs.run == 'true' && needs.smoke.result == 'success'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Snapcraft
+        run: sudo snap install snapcraft --classic --channel=latest/stable
+      - name: Recheck the candidate revision set immediately before promotion
+        env:
+          AMD64_REVISION: ${{ needs.discover.outputs.amd64 }}
+          ARM64_REVISION: ${{ needs.discover.outputs.arm64 }}
+        run: |
+          python3 scripts/snap-candidates.py verify \
+            --amd64 "$AMD64_REVISION" --arm64 "$ARM64_REVISION"
+      - name: Release only the tested revisions to latest/stable
+        env:
+          # Set this Actions secret to a restricted Snapcraft exported login:
+          # https://documentation.ubuntu.com/snapcraft/latest/reference/commands/export-login/
+          # snapcraft export-login --snaps=omp-auth-gateway --channels=latest/stable \
+          #   --acls=package_access,package_release snap-store-credentials
+          # Store the file's contents as the secret, then remove the local file.
+          # Publishing credentials are confined to this step, never smoke jobs.
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          AMD64_REVISION: ${{ needs.discover.outputs.amd64 }}
+          ARM64_REVISION: ${{ needs.discover.outputs.arm64 }}
+        run: |
+          if [ -z "$SNAPCRAFT_STORE_CREDENTIALS" ]; then
+            echo "::error::SNAPCRAFT_STORE_CREDENTIALS is required for promotion."
+            exit 1
+          fi
+          snapcraft release omp-auth-gateway "$AMD64_REVISION" latest/stable
+          snapcraft release omp-auth-gateway "$ARM64_REVISION" latest/stable
