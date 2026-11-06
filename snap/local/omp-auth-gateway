@@ -6,6 +6,12 @@
 # from the shared vault dir that `broker-daemon` writes to.
 set -eu
 
+if [ "$(id -u)" -ne 0 ]; then
+  echo "omp-auth-gateway: run this as root." >&2
+  echo "Try: sudo omp-auth-gateway $*" >&2
+  exit 1
+fi
+
 export HOME="${SNAP_COMMON}"
 mkdir -p "${HOME}/.omp" 2>/dev/null || true
 
