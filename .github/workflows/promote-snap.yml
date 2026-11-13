@@ -58,6 +58,23 @@ jobs:
         run: |
           sudo snap install omp-auth-gateway --revision="$REVISION"
           sudo snap refresh --hold=forever omp-auth-gateway
+      - name: Reject non-root wrapper invocation with a friendly error
+        run: |
+          set -eu
+          for cmd in omp-auth-gateway omp-auth-gateway.broker; do
+            if output="$("$cmd" status 2>&1)"; then
+              echo "::error::$cmd unexpectedly succeeded without sudo"
+              exit 1
+            fi
+            echo "$output"
+            case "$output" in
+              *"run this as root"*) ;;
+              *)
+                echo "::error::$cmd did not print the friendly root-required message"
+                exit 1
+                ;;
+            esac
+          done
       - name: Install latest released upstream omp
         env:
           UPSTREAM_ARCHITECTURE: ${{ matrix.upstream_architecture }}
