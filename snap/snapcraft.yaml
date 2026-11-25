@@ -23,9 +23,11 @@ description: |
   box; expose the broker one with:
     snap alias omp-auth-gateway.broker omp-auth-broker
 
-  Both the CLI wrappers and the daemons share a single root-owned vault, so
-  `sudo omp-auth-broker login anthropic` adds credentials that the running
-  broker-daemon immediately serves.
+  Both the CLI wrappers and the daemons share a single root-owned vault
+  under $SNAP_COMMON/.omp, so `sudo omp-auth-broker login anthropic` adds
+  credentials that the running broker-daemon immediately serves. The
+  wrappers run from $SNAP_COMMON so omp's home and project-config probes
+  never leave the snap's data directory.
 
   Configuration (changes restart the affected services):
     snap set omp-auth-gateway gateway.bind=0.0.0.0:4000

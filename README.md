@@ -85,9 +85,15 @@ sudo snap set omp-auth-gateway gateway.broker-url=http://127.0.0.1:8765
 ## Notes
 
 - **Confinement:** strict, with only the `network` and `network-bind`
-  interfaces. State (SQLite vault, bearer tokens) lives in the snap's own
-  `$SNAP_COMMON/.omp`, which persists across refreshes. Because that area is
-  root-owned, the management commands are run with `sudo`.
+  interfaces. The wrappers set `HOME` and `cd` to `$SNAP_COMMON`, so all
+  state — SQLite vault, bearer tokens, config, logs — lives under
+  `$SNAP_COMMON/.omp` and never touches the real user's home. Because that
+  area is root-owned, the management commands are run with `sudo`.
+- **File arguments:** the wrappers `cd` into `$SNAP_COMMON` before running,
+  so commands that take file paths (`omp-auth-broker import`, `migrate`)
+  resolve relative paths against the vault, not your shell's cwd. Pass
+  absolute paths under `/var/snap/omp-auth-gateway/common` (the confinement
+  blocks `/home` and `/root` regardless).
 - **Security:** every broker/gateway endpoint except the health checks requires
   a bearer token, but transport security between operator, broker, gateway and
   clients is up to you (Tailscale / WireGuard / a TLS reverse proxy).

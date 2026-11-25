@@ -28,4 +28,7 @@ if [ "${1:-}" = "serve" ]; then
   esac
 fi
 
+# Run from the shared vault dir: omp also probes <cwd>/.omp for project
+# config, and the caller's cwd is typically outside the confinement.
+cd "${SNAP_COMMON}"
 exec "${SNAP}/bin/omp" auth-broker "$@"

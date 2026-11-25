@@ -48,4 +48,7 @@ if [ -z "${OMP_AUTH_BROKER_TOKEN:-}" ] && [ -r "${broker_token_file}" ]; then
   export OMP_AUTH_BROKER_TOKEN
 fi
 
+# Run from the shared vault dir: omp also probes <cwd>/.omp for project
+# config, and the caller's cwd is typically outside the confinement.
+cd "${SNAP_COMMON}"
 exec "${SNAP}/bin/omp" auth-gateway "$@"

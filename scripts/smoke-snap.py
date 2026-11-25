@@ -110,6 +110,13 @@ def main():
         override = Path(f"/etc/systemd/system/snap.{SNAP}.gateway-daemon.service.d/smoke.conf")
         try:
             wait_for(f"{BROKER}/v1/healthz")
+            # The wrapper CLI must work from any cwd: omp probes <cwd>/.omp
+            # for project config, and a home-dir cwd is AppArmor-denied.
+            # `list` loads settings; `token` alone would not catch this.
+            probe = run("sudo", f"{SNAP}.broker", "list",
+                        cwd=Path.home(), capture_output=True)
+            if "providers" not in probe.stdout:
+                raise RuntimeError(f"Unexpected broker list output: {probe.stdout!r}")
             broker_token = run("sudo", f"{SNAP}.broker", "token",
                                capture_output=True).stdout.strip()
             snapshot = request(f"{BROKER}/v1/snapshot", token=broker_token)
